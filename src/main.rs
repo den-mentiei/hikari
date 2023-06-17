@@ -28,6 +28,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 	// Render
 
+	let mut world = World::new();
+	world.objects.push(Box::new(Sphere {
+		center: Point3::new(0.0, 0.0, -1.0),
+		radius: 0.5,
+	}));
+	world.objects.push(Box::new(Sphere {
+		center: Point3::new(0.0, -100.5, -1.0),
+		radius: 100.0,
+	}));
+
 	let mut data = String::with_capacity(WIDTH * HEIGHT * 3);
 
 	// P3 means colours are in ascii, then columns and rows,
@@ -42,7 +52,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 			let v   = (y as f32) / ((HEIGHT - 1) as f32);
 			let dir = lower_left_corner + u * horizontal + v * vertical - origin;
 			let ray = Ray::new(origin, dir);
-			let c   = ray_color(ray);
+			let c   = ray_color(&world, ray);
 			write_color(&mut data, c);
 		}
 	}
@@ -57,12 +67,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 	Ok(())
 }
 
-fn ray_color(ray: Ray) -> Color3 {
-	let t = hit_sphere(Point3::new(0.0, 0.0, -1.0), 0.5, ray);
-	if t > 0.0 {
-		// hit_point - C
-		let n = (ray.at(t) - Vec3::new(0.0, 0.0, -1.0)).normalized();
-		return 0.5 * (n + Vec3::broadcast(1.0));
+fn ray_color(world: &World, ray: Ray) -> Color3 {
+	if let Some(hit) = world.hit(ray, 0.0, f32::INFINITY) {
+		return 0.5 * (hit.n + Vec3::broadcast(1.0));
 	}
 	let dir = ray.dir.normalized();
 	let t   = 0.5 * (dir.y + 1.0);
@@ -81,6 +88,87 @@ fn hit_sphere(center: Point3, radius: f32, ray: Ray) -> f32 {
 		-1.0
 	} else {
 		(-half_b - d.sqrt()) / a
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Hit {
+	p: Point3,
+	n: Vec3,
+	t: f32,
+	front_face: bool,
+}
+
+trait Hittable {
+	fn hit(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<Hit>;
+}
+
+struct Sphere {
+	center: Point3,
+	radius: f32,
+}
+
+impl Hittable for Sphere {
+    fn hit(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<Hit> {
+		let oc     = ray.origin - self.center;
+		let a      = ray.dir.mag_sq();
+		let half_b = oc.dot(ray.dir);
+		let c      = oc.mag_sq() - self.radius * self.radius;
+		let d      = half_b * half_b - a * c;
+		if d < 0.0 {
+			return None;
+		}
+
+		let sqrtd = d.sqrt();
+
+		// Nearest root in [t_min, t_max]:
+		let root = (-half_b - sqrtd) / a;
+		if root < t_min || t_max < root {
+			let root = (-half_b + sqrtd) / a;
+			if root < t_min || t_max < root {
+				return None;
+			}
+		}
+
+		let t = root;
+		let p = ray.at(t);
+
+		let outward_n  = (p - self.center) / self.radius;
+		let front_face = ray.dir.dot(outward_n) < 0.0;
+
+		let n = if front_face { outward_n } else { -outward_n };
+
+		Some(Hit { p, n, t, front_face })
+    }
+}
+
+struct World {
+	// @Speed Replace this with a bunch of homogenous lists.
+	// We actually need a nice acceleration structure here.
+	objects: Vec<Box<dyn Hittable>>,
+}
+
+impl World {
+	fn new() -> Self {
+		Self {
+			objects: Vec::new(),
+		}
+	}
+}
+
+impl Hittable for World {
+	fn hit(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<Hit> {
+		let mut hit     = None;
+		let mut closest = t_max;
+
+		for o in self.objects.iter() {
+			if let Some(object_hit) = o.hit(ray, t_min, closest) {
+				closest = object_hit.t;
+				hit     = Some(object_hit);
+			}
+		}
+
+		return hit;
 	}
 }
 
