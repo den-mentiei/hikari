@@ -9,10 +9,11 @@ use rand::prelude::*;
 use ultraviolet::{Vec3, Lerp};
 
 const ASPECT_RATIO: f32 = 16.0 / 9.0;
-const WIDTH: usize      = 600;
+const WIDTH: usize      = 400;
 const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
-const SAMPLES_PER_PIXEL: u8 = 100;
+const SAMPLES_PER_PIXEL: u32 = 500;
+const MAX_DEPTH: i8          = 50;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
@@ -49,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 				let u   = (x as f32 + dx) / ((WIDTH - 1) as f32);
 				let v   = (y as f32 + dy) / ((HEIGHT - 1) as f32);
 				let ray = camera.ray(u, v);
-				c += ray_color(&world, ray);
+				c += ray_color(&world, ray, MAX_DEPTH);
 			}
 			write_color(&mut data, c, SAMPLES_PER_PIXEL);
 		}
@@ -65,10 +66,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 	Ok(())
 }
 
-fn ray_color(world: &World, ray: Ray) -> Color3 {
-	if let Some(hit) = world.hit(ray, 0.0, f32::INFINITY) {
-		return 0.5 * (hit.n + Vec3::broadcast(1.0));
+// @Speed Remove recursion.
+fn ray_color(world: &World, ray: Ray, depth: i8) -> Color3 {
+	if depth <= 0 {
+		return Color3::zero();
 	}
+
+	// t_min = 0.001 to fix shadow acne.
+	if let Some(hit) = world.hit(ray, 0.001, f32::INFINITY) {
+		let target = hit.p + hit.n + random_unit_vector();
+		return 0.5 * ray_color(world, Ray::new(hit.p, target - hit.p), depth - 1);
+	}
+
 	let dir = ray.dir.normalized();
 	let t   = 0.5 * (dir.y + 1.0);
 	Color3::broadcast(1.0).lerp(Color3::new(0.5, 0.7, 1.0), t)
@@ -212,9 +221,14 @@ impl Camera for DummyCamera {
 type Point3 = Vec3;
 type Color3 = Vec3;
 
-fn write_color<W: Write>(w: &mut W, mut c: Color3, samples: u8) {
+fn write_color<W: Write>(w: &mut W, mut c: Color3, samples: u32) {
 	let scale = 1.0 / samples as f32;
 	c *= scale;
+
+	// Gamma-correct for gamma of 2.0?
+	c.x = c.x.sqrt();
+	c.y = c.y.sqrt();
+	c.z = c.z.sqrt();
 
 	let min_color = Color3::broadcast(0.0);
 	let max_color = Color3::broadcast(0.999);
@@ -222,6 +236,40 @@ fn write_color<W: Write>(w: &mut W, mut c: Color3, samples: u8) {
 	c *= 256.0;
 
 	_ = writeln!(w, "{} {} {}", c.x as u8, c.y as u8, c.z as u8);
+}
+
+fn random_unit_vector() -> Vec3 {
+	random_in_unit_sphere().normalized()
+}
+
+fn random_in_unit_sphere() -> Vec3 {
+	let mut rng = rand::thread_rng();
+	loop {
+		let x = rng.gen_range(-1.0f32..1.0f32);
+		let y = rng.gen_range(-1.0f32..1.0f32);
+		let z = rng.gen_range(-1.0f32..1.0f32);
+		let p = Vec3::new(x, y, z);
+		if p.mag_sq() < 1.0 {
+			return p;
+		}
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Ray {
+	origin: Point3,
+	dir:    Vec3,
+}
+
+impl Ray {
+	fn new(origin: Point3, dir: Vec3) -> Self {
+		Self { origin, dir }
+	}
+
+	#[inline]
+	fn at(&self, t: f32) -> Point3 {
+		self.origin + self.dir * t
+	}
 }
 
 struct Timer {
@@ -242,22 +290,5 @@ impl Drop for Timer {
 	fn drop(&mut self) {
 		let elapsed = Instant::now().duration_since(self.start);
 		println!("{} took {:?}", self.label, elapsed);
-	}
-}
-
-#[derive(Debug, Copy, Clone)]
-struct Ray {
-	origin: Point3,
-	dir:    Vec3,
-}
-
-impl Ray {
-	fn new(origin: Point3, dir: Vec3) -> Self {
-		Self { origin, dir }
-	}
-
-	#[inline]
-	fn at(&self, t: f32) -> Point3 {
-		self.origin + self.dir * t
 	}
 }
