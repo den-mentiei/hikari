@@ -1,12 +1,32 @@
+#![allow(dead_code)]
+
 use std::error::Error;
 use std::fmt::Write;
 use std::fs;
+use std::time::Instant;
 
-const WIDTH: usize  = 256;
-const HEIGHT: usize = 256;
+use ultraviolet::{Vec3, Lerp};
+
+const ASPECT_RATIO: f32 = 16.0 / 9.0;
+const WIDTH: usize      = 600;
+const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
+
+	// Camera
+
+	let viewport_height = 2.0f32;
+	let viewport_width  = ASPECT_RATIO * viewport_height;
+	let focal_length    = 1.0f32;
+
+	let origin     = Point3::zero();
+	let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
+	let vertical   = Vec3::new(0.0, viewport_height, 0.0);
+
+	let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
+
+	// Render
 
 	let mut data = String::with_capacity(WIDTH * HEIGHT * 3);
 
@@ -15,23 +35,76 @@ fn main() -> Result<(), Box<dyn Error>> {
 	_ = writeln!(&mut data, "P3");
 	_ = writeln!(&mut data, "{WIDTH} {HEIGHT}\n255");
 
-	for y in 0..HEIGHT {
+	let t = Timer::new("ppm in-memory formatting");
+	for y in (0..HEIGHT).rev() {
 		for x in 0..WIDTH {
-			let r = (x as f32) / ((WIDTH - 1) as f32);
-			let g = (y as f32) / ((HEIGHT - 1) as f32);
-			let b = 0.25;
-
-			let ir = (255.999 * r) as u8;
-			let ig = (255.999 * g) as u8;
-			let ib = (255.999 * b) as u8;
-
-			_ = writeln!(&mut data, "{ir} {ig} {ib}");
+			let u   = (x as f32) / ((WIDTH - 1) as f32);
+			let v   = (y as f32) / ((HEIGHT - 1) as f32);
+			let dir = lower_left_corner + u * horizontal + v * vertical - origin;
+			let ray = Ray::new(origin, dir);
+			let c   = ray_color(ray);
+			write_color(&mut data, c);
 		}
 	}
+	drop(t);
+
+	let t = Timer::new("output writing");
+	fs::write("image.ppm", &data)?;
+	drop(t);
 
 	println!("ppm buffer capacity={} used={}", data.capacity(), data.len());
 
-	fs::write("image.ppm", data)?;
-
 	Ok(())
+}
+
+fn ray_color(r: Ray) -> Color3 {
+	let dir = r.dir.normalized();
+	let t   = 0.5 * (dir.y + 1.0);
+	Color3::broadcast(1.0).lerp(Color3::new(0.5, 0.7, 1.0), t)
+}
+
+type Point3 = Vec3;
+type Color3 = Vec3;
+
+fn write_color<W: Write>(w: &mut W, mut c: Color3) {
+	c *= 255.999;
+	_ = writeln!(w, "{} {} {}", c.x as u8, c.y as u8, c.z as u8);
+}
+
+struct Timer {
+	label: &'static str,
+	start: Instant,
+}
+
+impl Timer {
+	fn new(label: &'static str) -> Self {
+		Self {
+			label,
+			start: Instant::now(),
+		}
+	}
+}
+
+impl Drop for Timer {
+	fn drop(&mut self) {
+		let elapsed = Instant::now().duration_since(self.start);
+		println!("{} took {:?}", self.label, elapsed);
+	}
+}
+
+#[derive(Debug, Copy, Clone)]
+struct Ray {
+	origin: Point3,
+	dir:    Vec3,
+}
+
+impl Ray {
+	fn new(origin: Point3, dir: Vec3) -> Self {
+		Self { origin, dir }
+	}
+
+	#[inline]
+	fn at(&self, t: f32) -> Point3 {
+		self.origin + self.dir * t
+	}
 }

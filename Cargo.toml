@@ -8,6 +8,7 @@ repository = "https://github.com/den-mentiei/hikari"
 readme     = "README.md"
 
 [dependencies]
+ultraviolet = "0.9"
 
 [profile.dev]
 panic = "abort"
