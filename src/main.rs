@@ -5,28 +5,19 @@ use std::fmt::Write;
 use std::fs;
 use std::time::Instant;
 
+use rand::prelude::*;
 use ultraviolet::{Vec3, Lerp};
 
 const ASPECT_RATIO: f32 = 16.0 / 9.0;
 const WIDTH: usize      = 600;
 const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
+const SAMPLES_PER_PIXEL: u8 = 100;
+
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
 
-	// Camera
-
-	let viewport_height = 2.0f32;
-	let viewport_width  = ASPECT_RATIO * viewport_height;
-	let focal_length    = 1.0f32;
-
-	let origin     = Point3::zero();
-	let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
-	let vertical   = Vec3::new(0.0, viewport_height, 0.0);
-
-	let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
-
-	// Render
+	let camera = DummyCamera::new();
 
 	let mut world = World::new();
 	world.objects.push(Box::new(Sphere {
@@ -45,15 +36,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 	_ = writeln!(&mut data, "P3");
 	_ = writeln!(&mut data, "{WIDTH} {HEIGHT}\n255");
 
+	let mut rng = rand::thread_rng();
+
 	let t = Timer::new("ppm in-memory formatting");
 	for y in (0..HEIGHT).rev() {
 		for x in 0..WIDTH {
-			let u   = (x as f32) / ((WIDTH - 1) as f32);
-			let v   = (y as f32) / ((HEIGHT - 1) as f32);
-			let dir = lower_left_corner + u * horizontal + v * vertical - origin;
-			let ray = Ray::new(origin, dir);
-			let c   = ray_color(&world, ray);
-			write_color(&mut data, c);
+			let mut c = Color3::zero();
+			for _ in 0..SAMPLES_PER_PIXEL {
+				let dx: f32 = rng.gen();
+				let dy: f32 = rng.gen();
+
+				let u   = (x as f32 + dx) / ((WIDTH - 1) as f32);
+				let v   = (y as f32 + dy) / ((HEIGHT - 1) as f32);
+				let ray = camera.ray(u, v);
+				c += ray_color(&world, ray);
+			}
+			write_color(&mut data, c, SAMPLES_PER_PIXEL);
 		}
 	}
 	drop(t);
@@ -172,11 +170,57 @@ impl Hittable for World {
 	}
 }
 
+trait Camera {
+	fn ray(&self, u: f32, v: f32) -> Ray;
+}
+
+struct DummyCamera {
+	origin: Point3,
+	lower_left_corner: Point3,
+	horizontal: Vec3,
+	vertical: Vec3,
+}
+
+impl DummyCamera {
+	fn new() -> Self {
+		let viewport_height = 2.0f32;
+		let viewport_width  = ASPECT_RATIO * viewport_height;
+		let focal_length    = 1.0f32;
+
+		let origin     = Point3::zero();
+		let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
+		let vertical   = Vec3::new(0.0, viewport_height, 0.0);
+
+		let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
+
+		Self {
+			origin,
+			lower_left_corner,
+			horizontal,
+			vertical,
+		}
+	}
+}
+
+impl Camera for DummyCamera {
+	fn ray(&self, u: f32, v: f32) -> Ray {
+		let dir = self.lower_left_corner + u * self.horizontal + v * self.vertical - self.origin;
+		Ray::new(self.origin, dir)
+	}
+}
+
 type Point3 = Vec3;
 type Color3 = Vec3;
 
-fn write_color<W: Write>(w: &mut W, mut c: Color3) {
-	c *= 255.999;
+fn write_color<W: Write>(w: &mut W, mut c: Color3, samples: u8) {
+	let scale = 1.0 / samples as f32;
+	c *= scale;
+
+	let min_color = Color3::broadcast(0.0);
+	let max_color = Color3::broadcast(0.999);
+	c.clamp(min_color, max_color);
+	c *= 256.0;
+
 	_ = writeln!(w, "{} {} {}", c.x as u8, c.y as u8, c.z as u8);
 }
 

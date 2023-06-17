@@ -8,6 +8,7 @@ repository = "https://github.com/den-mentiei/hikari"
 readme     = "README.md"
 
 [dependencies]
+rand        = "0.8"
 ultraviolet = "0.9"
 
 [profile.dev]
