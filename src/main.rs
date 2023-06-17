@@ -57,10 +57,31 @@ fn main() -> Result<(), Box<dyn Error>> {
 	Ok(())
 }
 
-fn ray_color(r: Ray) -> Color3 {
-	let dir = r.dir.normalized();
+fn ray_color(ray: Ray) -> Color3 {
+	let t = hit_sphere(Point3::new(0.0, 0.0, -1.0), 0.5, ray);
+	if t > 0.0 {
+		// hit_point - C
+		let n = (ray.at(t) - Vec3::new(0.0, 0.0, -1.0)).normalized();
+		return 0.5 * (n + Vec3::broadcast(1.0));
+	}
+	let dir = ray.dir.normalized();
 	let t   = 0.5 * (dir.y + 1.0);
 	Color3::broadcast(1.0).lerp(Color3::new(0.5, 0.7, 1.0), t)
+}
+
+// (P - C)*(P - C) = r^2
+// where P(t) is the ray and (C, r) is a sphere
+fn hit_sphere(center: Point3, radius: f32, ray: Ray) -> f32 {
+	let oc     = ray.origin - center;
+	let a      = ray.dir.mag_sq();
+	let half_b = oc.dot(ray.dir);
+	let c      = oc.mag_sq() - radius * radius;
+	let d      = half_b * half_b - a * c;
+	if d < 0.0 {
+		-1.0
+	} else {
+		(-half_b - d.sqrt()) / a
+	}
 }
 
 type Point3 = Vec3;
