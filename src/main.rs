@@ -21,13 +21,35 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let camera = DummyCamera::new();
 
 	let mut world = World::new();
+
+	let ground = MaterialIndex(0);
+	world.materials.push(Box::new(Lambertian::new(Color3::new(0.8, 0.8, 0.0))));
+	let center = MaterialIndex(1);
+	world.materials.push(Box::new(Lambertian::new(Color3::new(0.7, 0.3, 0.3))));
+	let left   = MaterialIndex(2);
+	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.8, 0.8))));
+	let right  = MaterialIndex(3);
+	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.6, 0.2))));
+
 	world.objects.push(Box::new(Sphere {
-		center: Point3::new(0.0, 0.0, -1.0),
-		radius: 0.5,
+		center:   Point3::new(0.0, -100.5, -1.0),
+		radius:   100.0,
+		material: ground,
 	}));
 	world.objects.push(Box::new(Sphere {
-		center: Point3::new(0.0, -100.5, -1.0),
-		radius: 100.0,
+		center:   Point3::new(0.0, 0.0, -1.0),
+		radius:   0.5,
+		material: center,
+	}));
+	world.objects.push(Box::new(Sphere {
+		center:   Point3::new(-1.0, 0.0, -1.0),
+		radius:   0.5,
+		material: left,
+	}));
+	world.objects.push(Box::new(Sphere {
+		center:   Point3::new(1.0, 0.0, -1.0),
+		radius:   0.5,
+		material: right,
 	}));
 
 	let mut data = String::with_capacity(WIDTH * HEIGHT * 3);
@@ -74,8 +96,14 @@ fn ray_color(world: &World, ray: Ray, depth: i8) -> Color3 {
 
 	// t_min = 0.001 to fix shadow acne.
 	if let Some(hit) = world.hit(ray, 0.001, f32::INFINITY) {
-		let target = hit.p + hit.n + random_unit_vector();
-		return 0.5 * ray_color(world, Ray::new(hit.p, target - hit.p), depth - 1);
+		// let target = hit.p + hit.n + random_unit_vector();
+		// return 0.5 * ray_color(world, Ray::new(hit.p, target - hit.p), depth - 1);
+		let material = &world.materials[hit.material.0];
+		if let Some((scattered, attenuation)) = material.scatter(&ray, &hit) {
+			return attenuation * ray_color(world, scattered, depth - 1);
+		} else {
+			return Color3::zero();
+		}
 	}
 
 	let dir = ray.dir.normalized();
@@ -98,21 +126,77 @@ fn hit_sphere(center: Point3, radius: f32, ray: Ray) -> f32 {
 	}
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+struct MaterialIndex(usize);
+
 #[derive(Debug, Copy, Clone)]
 struct Hit {
 	p: Point3,
 	n: Vec3,
 	t: f32,
 	front_face: bool,
+	material: MaterialIndex,
 }
 
 trait Hittable {
 	fn hit(&self, ray: Ray, t_min: f32, t_max: f32) -> Option<Hit>;
 }
 
+trait Material {
+	fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<(Ray, Color3)>;
+}
+
+struct Lambertian {
+	color: Color3,
+}
+
+impl Lambertian {
+	fn new(color: Color3) -> Self {
+		Self { color }
+	}
+}
+
+impl Material for Lambertian {
+	fn scatter(&self, _ray: &Ray, hit: &Hit) -> Option<(Ray, Color3)> {
+		let mut scatter_dir = hit.n + random_unit_vector();
+		// Degenerate scatter direction (aka opposite to the hit
+		// normal).
+		if is_near_zero(scatter_dir) {
+			scatter_dir = hit.n;
+		}
+		let scattered   = Ray::new(hit.p, scatter_dir);
+		Some((scattered, self.color))
+	}
+}
+
+struct Metal {
+	color: Color3,
+}
+
+impl Metal {
+	fn new(color: Color3) -> Self {
+		Self { color }
+	}
+}
+
+impl Material for Metal {
+	fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<(Ray, Color3)> {
+		let reflected   = ray.dir.normalized().reflected(hit.n);
+		let scattered   = Ray::new(hit.p, reflected);
+		let attenuation = self.color;
+		if scattered.dir.dot(hit.n) > 0.0 {
+			Some((scattered, attenuation))
+		} else {
+			None
+		}
+	}
+}
+
 struct Sphere {
 	center: Point3,
 	radius: f32,
+	material: MaterialIndex,
 }
 
 impl Hittable for Sphere {
@@ -145,20 +229,24 @@ impl Hittable for Sphere {
 
 		let n = if front_face { outward_n } else { -outward_n };
 
-		Some(Hit { p, n, t, front_face })
+		let material = self.material;
+
+		Some(Hit { p, n, t, front_face, material })
     }
 }
 
 struct World {
 	// @Speed Replace this with a bunch of homogenous lists.
 	// We actually need a nice acceleration structure here.
-	objects: Vec<Box<dyn Hittable>>,
+	objects:   Vec<Box<dyn Hittable>>,
+	materials: Vec<Box<dyn Material>>,
 }
 
 impl World {
 	fn new() -> Self {
 		Self {
-			objects: Vec::new(),
+			objects:   Vec::new(),
+			materials: Vec::new(),
 		}
 	}
 }
@@ -242,6 +330,16 @@ fn random_unit_vector() -> Vec3 {
 	random_in_unit_sphere().normalized()
 }
 
+fn random_in_hemisphere(n: Vec3) -> Vec3 {
+	let in_unit_sphere = random_in_unit_sphere();
+	// If same hemisphere as normal.
+	if in_unit_sphere.dot(n) > 0.0 {
+		in_unit_sphere
+	} else {
+		-in_unit_sphere
+	}
+}
+
 fn random_in_unit_sphere() -> Vec3 {
 	let mut rng = rand::thread_rng();
 	loop {
@@ -291,4 +389,9 @@ impl Drop for Timer {
 		let elapsed = Instant::now().duration_since(self.start);
 		println!("{} took {:?}", self.label, elapsed);
 	}
+}
+
+fn is_near_zero(v: Vec3) -> bool {
+	const EPS: f32 = 1e-8;
+	v.x.abs() < EPS && v.y.abs() < EPS && v.z.abs() < EPS
 }
