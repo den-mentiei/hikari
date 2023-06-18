@@ -27,9 +27,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let center = MaterialIndex(1);
 	world.materials.push(Box::new(Lambertian::new(Color3::new(0.7, 0.3, 0.3))));
 	let left   = MaterialIndex(2);
-	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.8, 0.8))));
+	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.8, 0.8), 0.3)));
 	let right  = MaterialIndex(3);
-	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.6, 0.2))));
+	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.6, 0.2), 1.0)));
 
 	world.objects.push(Box::new(Sphere {
 		center:   Point3::new(0.0, -100.5, -1.0),
@@ -172,18 +172,19 @@ impl Material for Lambertian {
 
 struct Metal {
 	color: Color3,
+	rough: f32,
 }
 
 impl Metal {
-	fn new(color: Color3) -> Self {
-		Self { color }
+	fn new(color: Color3, rough: f32) -> Self {
+		Self { color, rough }
 	}
 }
 
 impl Material for Metal {
 	fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<(Ray, Color3)> {
 		let reflected   = ray.dir.normalized().reflected(hit.n);
-		let scattered   = Ray::new(hit.p, reflected);
+		let scattered   = Ray::new(hit.p, reflected + self.rough * random_in_unit_sphere());
 		let attenuation = self.color;
 		if scattered.dir.dot(hit.n) > 0.0 {
 			Some((scattered, attenuation))
