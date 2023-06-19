@@ -12,13 +12,18 @@ const ASPECT_RATIO: f32 = 16.0 / 9.0;
 const WIDTH: usize      = 400;
 const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
-const SAMPLES_PER_PIXEL: u32 = 300;
-const MAX_DEPTH: i32         = 50;
+const SAMPLES_PER_PIXEL: u32 = 1000;
+const MAX_DEPTH: i32         = 100;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
 
-	let camera = DummyCamera::new();
+	let camera = DummyCamera::new(
+		Point3::new(-2.0, 2.0, 1.0),
+		Point3::new(0.0, 0.0, -1.0),
+		Vec3::new(0.0, 1.0, 0.0),
+		20.0,
+	);
 
 	let mut world = World::new();
 
@@ -330,16 +335,27 @@ struct DummyCamera {
 }
 
 impl DummyCamera {
-	fn new() -> Self {
-		let viewport_height = 2.0f32;
+	fn new(
+		look_from: Point3,
+		look_at: Point3,
+		up: Vec3,
+		vertical_fov_in_degrees: f32,
+	) -> Self {
+		let theta = vertical_fov_in_degrees.to_radians();
+		let h     = (theta / 2.0).tan();
+
+		let viewport_height = 2.0 * h;
 		let viewport_width  = ASPECT_RATIO * viewport_height;
-		let focal_length    = 1.0f32;
 
-		let origin     = Point3::zero();
-		let horizontal = Vec3::new(viewport_width, 0.0, 0.0);
-		let vertical   = Vec3::new(0.0, viewport_height, 0.0);
+		let w = (look_from - look_at).normalized();
+		let u = up.cross(w).normalized();
+		let v = w.cross(u);
 
-		let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - Vec3::new(0.0, 0.0, focal_length);
+		let origin     = look_from;
+		let horizontal = viewport_width * u;
+		let vertical   = viewport_height * v;
+
+		let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - w;
 
 		Self {
 			origin,
@@ -351,8 +367,8 @@ impl DummyCamera {
 }
 
 impl Camera for DummyCamera {
-	fn ray(&self, u: f32, v: f32) -> Ray {
-		let dir = self.lower_left_corner + u * self.horizontal + v * self.vertical - self.origin;
+	fn ray(&self, s: f32, t: f32) -> Ray {
+		let dir = self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin;
 		Ray::new(self.origin, dir)
 	}
 }
