@@ -12,8 +12,8 @@ const ASPECT_RATIO: f32 = 16.0 / 9.0;
 const WIDTH: usize      = 400;
 const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
-const SAMPLES_PER_PIXEL: u32 = 500;
-const MAX_DEPTH: i8          = 50;
+const SAMPLES_PER_PIXEL: u32 = 300;
+const MAX_DEPTH: i32         = 50;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
@@ -27,9 +27,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 	let center = MaterialIndex(1);
 	world.materials.push(Box::new(Lambertian::new(Color3::new(0.7, 0.3, 0.3))));
 	let left   = MaterialIndex(2);
-	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.8, 0.8), 0.3)));
+	world.materials.push(Box::new(Dielectric::new(1.5)));
 	let right  = MaterialIndex(3);
-	world.materials.push(Box::new(Metal::new(Color3::new(0.8, 0.6, 0.2), 1.0)));
+	world.materials.push(Box::new(Metal::new(Color3::new(0.3, 0.2, 0.7), 1.0)));
 
 	world.objects.push(Box::new(Sphere {
 		center:   Point3::new(0.0, -100.5, -1.0),
@@ -44,6 +44,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 	world.objects.push(Box::new(Sphere {
 		center:   Point3::new(-1.0, 0.0, -1.0),
 		radius:   0.5,
+		material: left,
+	}));
+	world.objects.push(Box::new(Sphere {
+		center:   Point3::new(-1.0, 0.0, -1.0),
+		radius:   -0.4,
 		material: left,
 	}));
 	world.objects.push(Box::new(Sphere {
@@ -89,7 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 // @Speed Remove recursion.
-fn ray_color(world: &World, ray: Ray, depth: i8) -> Color3 {
+fn ray_color(world: &World, ray: Ray, depth: i32) -> Color3 {
 	if depth <= 0 {
 		return Color3::zero();
 	}
@@ -194,6 +199,51 @@ impl Material for Metal {
 	}
 }
 
+struct Dielectric {
+	index_of_refraction: f32,
+}
+
+impl Dielectric {
+	fn new(index_of_refraction: f32) -> Self {
+		Self { index_of_refraction }
+	}
+}
+
+impl Material for Dielectric {
+	fn scatter(&self, ray: &Ray, hit: &Hit) -> Option<(Ray, Color3)> {
+		let attenuation      = Color3::broadcast(1.0);
+		let refraction_ratio = if hit.front_face {
+			1.0 / self.index_of_refraction
+		} else {
+			self.index_of_refraction
+		};
+
+
+		let unit_dir     = ray.dir.normalized();
+		let cos_theta    = (-unit_dir).dot(hit.n).min(1.0);
+		let sin_theta    = (1.0 - cos_theta * cos_theta).sqrt();
+		let cant_refract = refraction_ratio * sin_theta > 1.0;
+
+		let mut rng   = rand::thread_rng();
+		let direction = if cant_refract || reflectance(cos_theta, refraction_ratio) > rng.gen() {
+			unit_dir.reflected(hit.n)
+		} else {
+			unit_dir.refracted(hit.n, refraction_ratio)
+		};
+
+		let scattered = Ray::new(hit.p, direction);
+
+		Some((scattered, attenuation))
+	}
+}
+
+// Schlick's approximation for reflectance.
+fn reflectance(cosine: f32, ref_idx: f32) -> f32 {
+	let r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+	let r0 = r0 * r0;
+	r0 + (1.0 - r0) * (1.0 - cosine).powi(5)
+}
+
 struct Sphere {
 	center: Point3,
 	radius: f32,
@@ -214,9 +264,9 @@ impl Hittable for Sphere {
 		let sqrtd = d.sqrt();
 
 		// Nearest root in [t_min, t_max]:
-		let root = (-half_b - sqrtd) / a;
+		let mut root = (-half_b - sqrtd) / a;
 		if root < t_min || t_max < root {
-			let root = (-half_b + sqrtd) / a;
+			root = (-half_b + sqrtd) / a;
 			if root < t_min || t_max < root {
 				return None;
 			}
