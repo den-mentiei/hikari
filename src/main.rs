@@ -12,17 +12,26 @@ const ASPECT_RATIO: f32 = 16.0 / 9.0;
 const WIDTH: usize      = 400;
 const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
-const SAMPLES_PER_PIXEL: u32 = 1000;
-const MAX_DEPTH: i32         = 100;
+const SAMPLES_PER_PIXEL: u32 = 300;
+const MAX_DEPTH: i32         = 50;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
 
+	let look_from      = Point3::new(3.0, 3.0,  2.0);
+	let look_at        = Point3::new(0.0, 0.0, -1.0);
+	let up             = Vec3::new(0.0, 1.0, 0.0);
+	let focus_distance = (look_from - look_at).mag();
+	let aperture       = 2.0;
+
 	let camera = DummyCamera::new(
-		Point3::new(-2.0, 2.0, 1.0),
-		Point3::new(0.0, 0.0, -1.0),
-		Vec3::new(0.0, 1.0, 0.0),
+		look_from,
+		look_at,
+		up,
 		20.0,
+		ASPECT_RATIO,
+		aperture,
+		focus_distance,
 	);
 
 	let mut world = World::new();
@@ -332,6 +341,10 @@ struct DummyCamera {
 	lower_left_corner: Point3,
 	horizontal: Vec3,
 	vertical: Vec3,
+	u: Vec3,
+	v: Vec3,
+	w: Vec3,
+	lens_radius: f32,
 }
 
 impl DummyCamera {
@@ -340,36 +353,58 @@ impl DummyCamera {
 		look_at: Point3,
 		up: Vec3,
 		vertical_fov_in_degrees: f32,
+		aspect_ratio: f32,
+		aperture: f32,
+		focus_distance: f32,
 	) -> Self {
 		let theta = vertical_fov_in_degrees.to_radians();
 		let h     = (theta / 2.0).tan();
 
 		let viewport_height = 2.0 * h;
-		let viewport_width  = ASPECT_RATIO * viewport_height;
+		let viewport_width  = aspect_ratio * viewport_height;
 
 		let w = (look_from - look_at).normalized();
 		let u = up.cross(w).normalized();
 		let v = w.cross(u);
 
 		let origin     = look_from;
-		let horizontal = viewport_width * u;
-		let vertical   = viewport_height * v;
+		let horizontal = focus_distance * viewport_width * u;
+		let vertical   = focus_distance * viewport_height * v;
 
-		let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - w;
+		let lower_left_corner = origin - horizontal / 2.0 - vertical / 2.0 - focus_distance * w;
+		let lens_radius       = aperture / 2.0;
 
 		Self {
 			origin,
 			lower_left_corner,
 			horizontal,
 			vertical,
+			u,
+			v,
+			w,
+			lens_radius,
 		}
 	}
 }
 
 impl Camera for DummyCamera {
 	fn ray(&self, s: f32, t: f32) -> Ray {
-		let dir = self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin;
-		Ray::new(self.origin, dir)
+		let rd     = self.lens_radius * random_in_unit_disk();
+		let offset = self.u * rd.x + self.v * rd.y;
+		let dir    = self.lower_left_corner + s * self.horizontal + t * self.vertical - self.origin - offset;
+		Ray::new(self.origin + offset, dir)
+	}
+}
+
+fn random_in_unit_disk() -> Vec3 {
+	let mut rng = rand::thread_rng();
+	loop {
+		let x = rng.gen_range(-1.0f32..1.0f32);
+		let y = rng.gen_range(-1.0f32..1.0f32);
+		let p = Vec3::new(x, y, 0.0);
+		if p.mag_sq() < 1.0 {
+			return p;
+		}
 	}
 }
 
