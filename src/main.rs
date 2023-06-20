@@ -8,21 +8,21 @@ use std::time::Instant;
 use rand::prelude::*;
 use ultraviolet::{Vec3, Lerp};
 
-const ASPECT_RATIO: f32 = 16.0 / 9.0;
-const WIDTH: usize      = 400;
+const ASPECT_RATIO: f32 = 3.0 / 2.0;
+const WIDTH: usize      = 800;
 const HEIGHT: usize     = ((WIDTH as f32) / ASPECT_RATIO) as usize;
 
-const SAMPLES_PER_PIXEL: u32 = 300;
+const SAMPLES_PER_PIXEL: u32 = 500;
 const MAX_DEPTH: i32         = 50;
 
 fn main() -> Result<(), Box<dyn Error>> {
 	println!("Hello, sailor!");
 
-	let look_from      = Point3::new(3.0, 3.0,  2.0);
-	let look_at        = Point3::new(0.0, 0.0, -1.0);
+	let look_from      = Point3::new(13.0, 2.0, 3.0);
+	let look_at        = Point3::zero();
 	let up             = Vec3::new(0.0, 1.0, 0.0);
-	let focus_distance = (look_from - look_at).mag();
-	let aperture       = 2.0;
+	let focus_distance = 10.0;
+	let aperture       = 0.1;
 
 	let camera = DummyCamera::new(
 		look_from,
@@ -36,39 +36,67 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 	let mut world = World::new();
 
-	let ground = MaterialIndex(0);
-	world.materials.push(Box::new(Lambertian::new(Color3::new(0.8, 0.8, 0.0))));
-	let center = MaterialIndex(1);
-	world.materials.push(Box::new(Lambertian::new(Color3::new(0.7, 0.3, 0.3))));
-	let left   = MaterialIndex(2);
-	world.materials.push(Box::new(Dielectric::new(1.5)));
-	let right  = MaterialIndex(3);
-	world.materials.push(Box::new(Metal::new(Color3::new(0.3, 0.2, 0.7), 1.0)));
+	let material = MaterialIndex(world.materials.len());
+	world.materials.push(Box::new(Lambertian::new(Color3::new(0.5, 0.5, 0.5))));
+	world.objects.push(Box::new(Sphere {
+		center: Point3::new(0.0, -1000.0, 0.0),
+		radius: 1000.0,
+		material,
+	}));
 
+	let mut rng = rand::thread_rng();
+	for a in -11..11 {
+		for b in -11..11 {
+			let a = a as f32;
+			let b = b as f32;
+
+			let choose_material: f32 = rng.gen();
+			let center = Point3::new(a + 0.9 * rng.gen::<f32>(), 0.2, b + 0.9 * rng.gen::<f32>());
+
+			if (center - Point3::new(4.0, 0.2, 0.0)).mag_sq() > 0.9 {
+				let material = MaterialIndex(world.materials.len());
+				if choose_material < 0.8 {
+					// Diffuse.
+					let albedo   = random_color() * random_color();
+					world.materials.push(Box::new(Lambertian::new(albedo)));
+				} else if choose_material < 0.95 {
+					// Metal.
+					let albedo     = random_color();
+					let rough: f32 = rng.gen_range(0.0..=0.5);
+					world.materials.push(Box::new(Metal::new(albedo, rough)));
+				} else {
+					// Glass.
+					world.materials.push(Box::new(Dielectric::new(1.5)));
+				}
+				world.objects.push(Box::new(Sphere {
+					center,
+					radius: 0.2,
+					material,
+				}));
+			}
+		}
+	}
+
+	let material = MaterialIndex(world.materials.len());
+	world.materials.push(Box::new(Dielectric::new(1.5)));
 	world.objects.push(Box::new(Sphere {
-		center:   Point3::new(0.0, -100.5, -1.0),
-		radius:   100.0,
-		material: ground,
+		center: Point3::new(0.0, 1.0, 0.0),
+		radius: 1.0,
+		material,
 	}));
+	let material = MaterialIndex(world.materials.len());
+	world.materials.push(Box::new(Lambertian::new(Color3::new(0.4, 0.2, 0.1))));
 	world.objects.push(Box::new(Sphere {
-		center:   Point3::new(0.0, 0.0, -1.0),
-		radius:   0.5,
-		material: center,
+		center: Point3::new(-4.0, 1.0, 0.0),
+		radius: 1.0,
+		material,
 	}));
+	let material = MaterialIndex(world.materials.len());
+	world.materials.push(Box::new(Metal::new(Color3::new(0.7, 0.6, 0.5), 0.0)));
 	world.objects.push(Box::new(Sphere {
-		center:   Point3::new(-1.0, 0.0, -1.0),
-		radius:   0.5,
-		material: left,
-	}));
-	world.objects.push(Box::new(Sphere {
-		center:   Point3::new(-1.0, 0.0, -1.0),
-		radius:   -0.4,
-		material: left,
-	}));
-	world.objects.push(Box::new(Sphere {
-		center:   Point3::new(1.0, 0.0, -1.0),
-		radius:   0.5,
-		material: right,
+		center: Point3::new(4.0, 1.0, 0.0),
+		radius: 1.0,
+		material,
 	}));
 
 	let mut data = String::with_capacity(WIDTH * HEIGHT * 3);
@@ -95,6 +123,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 			}
 			write_color(&mut data, c, SAMPLES_PER_PIXEL);
 		}
+		// println!("rendering row #{}/{}...", y + 1, HEIGHT);
 	}
 	drop(t);
 
@@ -396,11 +425,23 @@ impl Camera for DummyCamera {
 	}
 }
 
+fn random_color() -> Color3 {
+	random_color_range(0.0, 1.0)
+}
+
+fn random_color_range(lo: f32, hi: f32) -> Color3 {
+	let mut rng = rand::thread_rng();
+	let r = rng.gen_range(lo..=hi);
+	let g = rng.gen_range(lo..=hi);
+	let b = rng.gen_range(lo..=hi);
+	Color3::new(r, g, b)
+}
+
 fn random_in_unit_disk() -> Vec3 {
 	let mut rng = rand::thread_rng();
 	loop {
-		let x = rng.gen_range(-1.0f32..1.0f32);
-		let y = rng.gen_range(-1.0f32..1.0f32);
+		let x = rng.gen_range(-1.0..1.0);
+		let y = rng.gen_range(-1.0..1.0);
 		let p = Vec3::new(x, y, 0.0);
 		if p.mag_sq() < 1.0 {
 			return p;
